@@ -19,6 +19,7 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import android.util.Log
+import androidx.core.content.edit
 import androidx.core.content.ContextCompat
 import io.github.romanvht.byedpi.core.ByeDpiProxyCmdPreferences
 import io.github.romanvht.byedpi.core.ByeDpiProxyPreferences
@@ -45,6 +46,7 @@ internal class NativeEngine(
 
         fun configuration(context: Context): Configuration {
             val preferences = context.getPreferences()
+            if (preferences.mode() == Mode.VPN) preferences.migrateDotProfile()
             val proxy = ByeDpiProxyPreferences.fromSharedPreferences(preferences, context)
             val args = when (proxy) {
                 is ByeDpiProxyCmdPreferences -> proxy.args
@@ -59,6 +61,9 @@ internal class NativeEngine(
                 ipv6 = preferences.getBoolean("ipv6_enable", false),
                 appListType = preferences.getStringNotNull("applist_type", "disable"),
                 apps = preferences.getSelectedApps(),
+                dotEnabled = preferences.getBoolean("dot_enabled", false),
+                dotPackages = preferences.getStringSet("dot_selected_apps", emptySet())?.toList().orEmpty(),
+                dotServer = preferences.getStringNotNull("dot_server", "dns.zapret.moe"),
             )
         }
 
@@ -148,6 +153,9 @@ internal class NativeEngine(
                 failure = message.data.getString(EngineProtocol.ERROR) ?: "Native engine stopped"
                 started.completeExceptionally(IllegalStateException(failure))
             }
+            EngineProtocol.DOT_ERROR -> application.getPreferences().edit {
+                putString(EngineProtocol.DOT_RUNTIME_ERROR, message.data.getString(EngineProtocol.ERROR))
+            }
         }
         true
     })
@@ -199,6 +207,7 @@ internal class NativeEngine(
     }
 
     suspend fun start(configuration: Configuration) {
+        application.getPreferences().edit { remove(EngineProtocol.DOT_RUNTIME_ERROR) }
         connect(launchService = !serviceStarted)
         if (state == EngineProtocol.STATE_IDLE && !startSent) {
             require(configuration.args.isNotEmpty()) { "Proxy arguments are empty" }
@@ -212,6 +221,9 @@ internal class NativeEngine(
                 putBoolean(EngineProtocol.IPV6, configuration.ipv6)
                 putString(EngineProtocol.APP_LIST_TYPE, configuration.appListType)
                 putStringArray(EngineProtocol.APPS, configuration.apps.toTypedArray())
+                putBoolean(EngineProtocol.DOT_ENABLED, configuration.dotEnabled)
+                putStringArray(EngineProtocol.DOT_PACKAGES, configuration.dotPackages.toTypedArray())
+                putString(EngineProtocol.DOT_SERVER, configuration.dotServer)
             })
         }
         awaitStarted()
@@ -360,6 +372,7 @@ internal class NativeEngine(
 
     private fun onExit() {
         if (exited.isCompleted) return
+        application.getPreferences().edit { remove(EngineProtocol.DOT_RUNTIME_ERROR) }
         val error = IllegalStateException(failure ?: "Native engine process exited")
         unlink()
         unbind()

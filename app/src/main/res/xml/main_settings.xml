@@ -127,6 +127,29 @@
             android:title="@string/apps_select"
             app:fragment="io.github.romanvht.byedpi.fragments.AppSelectionFragment" />
 
+        <SwitchPreference
+            android:key="dot_enabled"
+            android:icon="@drawable/ic_dns"
+            android:title="@string/dot_setting"
+            android:summary="@string/dot_setting_summary"
+            android:defaultValue="false" />
+
+        <EditTextPreference
+            android:key="dot_server"
+            android:icon="@drawable/ic_dns"
+            android:title="@string/dot_server"
+            android:dependency="dot_enabled"
+            android:defaultValue="dns.zapret.moe" />
+
+        <Preference
+            android:key="dot_selected_apps"
+            android:icon="@drawable/ic_apps"
+            android:title="@string/dot_apps_select"
+            android:dependency="dot_enabled"
+            app:fragment="io.github.romanvht.byedpi.fragments.AppSelectionFragment">
+            <extra android:name="selection_key" android:value="dot_selected_apps" />
+        </Preference>
+
     </androidx.preference.PreferenceCategory>
 
     <androidx.preference.PreferenceCategory

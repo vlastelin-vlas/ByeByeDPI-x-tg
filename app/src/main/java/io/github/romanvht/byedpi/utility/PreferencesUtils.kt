@@ -8,6 +8,22 @@ import androidx.preference.PreferenceManager
 import io.github.romanvht.byedpi.data.Mode
 
 private const val DEFAULT_CMD_ARGS = "-o1 -a1 -r-5+se"
+private const val DOT_COMPAT_CMD_ARGS = "-a1 -r-5+se"
+
+internal fun dotCompatibleArgsOrNull(current: String, dotEnabled: Boolean, migrated: Boolean): String? =
+    DOT_COMPAT_CMD_ARGS.takeIf { dotEnabled && !migrated && current == DEFAULT_CMD_ARGS }
+
+fun SharedPreferences.migrateDotProfile() {
+    if (!getCmdEnable() || getStringSet("dot_selected_apps", emptySet()).isNullOrEmpty()) return
+    val enabled = getBoolean("dot_enabled", false)
+    val migrated = getBoolean("dot_profile_migrated", false)
+    if (!enabled || migrated) return
+    val replacement = dotCompatibleArgsOrNull(getCmdArgs(), enabled, migrated)
+    edit().apply {
+        if (replacement != null) putString("byedpi_cmd_args", replacement)
+        putBoolean("dot_profile_migrated", true)
+    }.apply()
+}
 
 val PreferenceFragmentCompat.sharedPreferences
     get() = preferenceScreen.sharedPreferences

@@ -8,6 +8,8 @@ import io.github.romanvht.byedpi.R
 import io.github.romanvht.byedpi.core.ByeDpiProxyUIPreferences
 import io.github.romanvht.byedpi.data.Mode
 import io.github.romanvht.byedpi.data.PrivateDnsState
+import io.github.romanvht.byedpi.services.EngineProtocol
+import io.github.romanvht.byedpi.services.SelectiveDns
 
 object DiagnosticUtils {
     fun buildReport(context: Context): String {
@@ -63,6 +65,19 @@ object DiagnosticUtils {
                     R.string.applist_setting,
                     appFilter(context, preferences.getStringNotNull("applist_type", "disable"))
                 ))
+                val selected = preferences.getStringSet("dot_selected_apps", emptySet()).orEmpty()
+                val vpnApps = preferences.getStringSet("selected_apps", emptySet()).orEmpty()
+                val eligible = SelectiveDns.eligiblePackages(
+                    preferences.getStringNotNull("applist_type", "disable"), vpnApps, selected)
+                appendLine(value(context, R.string.dot_setting,
+                    state(context, preferences.getBoolean("dot_enabled", false))))
+                appendLine(value(context, R.string.dot_server,
+                    preferences.getStringNotNull("dot_server", "dns.zapret.moe")))
+                appendLine(context.getString(R.string.dot_apps_summary, selected.size, eligible.size))
+                preferences.getString(EngineProtocol.DOT_RUNTIME_ERROR, null)?.let {
+                    appendLine(context.getString(R.string.dot_diagnostic_error, it))
+                }
+                appendLine(context.getString(R.string.dot_diagnostic_limit))
             }
             appendLine(value(context, R.string.bye_dpi_proxy_ip_setting, ip))
             appendLine(value(context, R.string.byedpi_proxy_port_setting, port))

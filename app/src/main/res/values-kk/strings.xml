@@ -97,6 +97,10 @@
     <string name="autoconnect_settings">ByeByeDPI ашылғанда автоматты түрде қосылу</string>
     <string name="applist_setting">Қолданбалар фильтрі</string>
     <string name="apps_select">Қолданбаларды таңдау</string>
+    <string name="dot_setting">DNS over TLS</string>
+    <string name="dot_setting_summary">Таңдалған қолданбалардың DNS сұрауларын шифрлау</string>
+    <string name="dot_apps_select">DoT қолданбалары</string>
+    <string name="dot_apps_summary">Таңдалды: %1$d; VPN ішінде: %2$d</string>
     <string name="search_apps">Қолданбаларды іздеу</string>
     <string name="storage_access">Файлдарға қолжетімділік</string>
     <string name="storage_access_summary">Стратегияларда файлдарды пайдалану үшін қойманы қолжетімді етіңіз</string>

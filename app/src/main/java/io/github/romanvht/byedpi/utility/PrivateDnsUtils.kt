@@ -21,14 +21,23 @@ object PrivateDnsUtils {
             val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val network = manager.activeNetwork ?: return PrivateDnsState.Unknown
             val properties = manager.getLinkProperties(network) ?: return PrivateDnsState.Unknown
-            val hostname = properties.privateDnsServerName
-            if (hostname.isNullOrBlank()) PrivateDnsState.Inactive
-            else PrivateDnsState.Configured(hostname)
+            stateFor(
+                properties.isPrivateDnsActive,
+                properties.privateDnsServerName,
+                context.getString(R.string.private_dns_automatic),
+            )
         } catch (e: SecurityException) {
             Log.w(TAG, "Failed to read private DNS state", e)
             PrivateDnsState.Unknown
         }
     }
+
+    internal fun stateFor(active: Boolean, hostname: String?, automaticLabel: String): PrivateDnsState =
+        if (active || !hostname.isNullOrBlank()) {
+            PrivateDnsState.Configured(hostname?.takeIf(String::isNotBlank) ?: automaticLabel)
+        } else {
+            PrivateDnsState.Inactive
+        }
 
     fun openSettings(context: Context) {
         Toast.makeText(context, R.string.private_dns_settings_message, Toast.LENGTH_LONG).show()

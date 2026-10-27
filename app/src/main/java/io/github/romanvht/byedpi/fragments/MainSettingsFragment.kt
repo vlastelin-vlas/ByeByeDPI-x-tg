@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Build
 import android.util.Log
 import android.widget.TextView
 import android.widget.Toast
@@ -18,6 +19,11 @@ import io.github.romanvht.byedpi.BuildConfig
 import io.github.romanvht.byedpi.activities.TestActivity
 import io.github.romanvht.byedpi.data.Mode
 import io.github.romanvht.byedpi.data.PrivateDnsState
+import io.github.romanvht.byedpi.services.SelectiveDns
+import io.github.romanvht.byedpi.services.DotStatus
+import io.github.romanvht.byedpi.services.DotEndpoint
+import io.github.romanvht.byedpi.services.EngineProtocol
+import io.github.romanvht.byedpi.services.NativeEngine
 import io.github.romanvht.byedpi.databinding.DialogDonateBinding
 import io.github.romanvht.byedpi.ewenloy.tgws.EwenloyTgWsServiceExtension
 import io.github.romanvht.byedpi.utility.*
@@ -41,6 +47,7 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
     private val statusUpdater = object : Runnable {
         override fun run() {
             updateTelegramRuntimeStatus()
+            updateDotStatus()
             uiHandler.postDelayed(this, 1500)
         }
     }
@@ -56,6 +63,12 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
         setEditTextPreferenceListener("byedpi_proxy_ip") { checkIp(it) }
         setEditTestPreferenceListenerPort("byedpi_proxy_port")
         setEditTextPreferenceListener("dns_ip") { it.isBlank() || checkNotLocalIp(it) }
+        findPreferenceNotNull<EditTextPreference>("dot_server")
+            .setOnPreferenceChangeListener { _, value ->
+                val valid = (value as? String)?.let { DotEndpoint.parse(it) } != null
+                if (!valid) Toast.makeText(requireContext(), R.string.dot_server_invalid, Toast.LENGTH_SHORT).show()
+                valid
+            }
 
         findPreferenceNotNull<ListPreference>("language")
             .setOnPreferenceChangeListener { _, newValue ->
@@ -182,6 +195,9 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
 
         val applistType = findPreferenceNotNull<ListPreference>("applist_type")
         val selectedApps = findPreferenceNotNull<Preference>("selected_apps")
+        val dotEnabled = findPreferenceNotNull<SwitchPreference>("dot_enabled")
+        val dotApps = findPreferenceNotNull<Preference>("dot_selected_apps")
+        val dotServer = findPreferenceNotNull<EditTextPreference>("dot_server")
         val batteryOptimization = findPreferenceNotNull<Preference>("battery_optimization")
         val storageAccess = findPreferenceNotNull<Preference>("storage_access")
 
@@ -204,6 +220,17 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
         dnsEdit.isVisible = false
         privateDns.summary = (privateDnsState as? PrivateDnsState.Configured)?.hostname
         privateDns.isVisible = mode == Mode.VPN && privateDnsState is PrivateDnsState.Configured
+
+        val preferences = sharedPreferences
+        val dnsPackages = preferences?.getStringSet("dot_selected_apps", emptySet()).orEmpty()
+        val vpnPackages = preferences?.getStringSet("selected_apps", emptySet()).orEmpty()
+        val eligible = SelectiveDns.eligiblePackages(applistType.value, vpnPackages, dnsPackages)
+        dotApps.summary = getString(R.string.dot_apps_summary, dnsPackages.size, eligible.size)
+        dotServer.summary = preferences?.getString("dot_server", "dns.zapret.moe") ?: "dns.zapret.moe"
+        dotEnabled.isVisible = mode == Mode.VPN
+        dotApps.isVisible = mode == Mode.VPN
+        dotServer.isVisible = mode == Mode.VPN
+        updateDotStatus()
 
         when (mode) {
             Mode.VPN -> {
@@ -382,6 +409,35 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
             else -> R.string.tg_ws_status_idle
         }
         statusPref.summary = getString(summaryRes)
+    }
+
+    private fun updateDotStatus() {
+        val prefs = sharedPreferences ?: return
+        val selection = prefs.getStringSet("dot_selected_apps", emptySet()).orEmpty()
+        val vpnSelection = prefs.getStringSet("selected_apps", emptySet()).orEmpty()
+        val vpnMode = prefs.getString("applist_type", "disable") ?: "disable"
+        val eligible = SelectiveDns.eligiblePackages(vpnMode, vpnSelection, selection)
+        val running = NativeEngine.running(requireContext())?.first == Mode.VPN
+        val status = DotStatus.resolve(
+            prefs.getBoolean("dot_enabled", false),
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
+            selection.size,
+            eligible.size,
+            PrivateDnsUtils.getState(requireContext()) is PrivateDnsState.Configured,
+            running,
+            prefs.getString(EngineProtocol.DOT_RUNTIME_ERROR, null) != null,
+        )
+        val summary = when (status) {
+            DotStatus.OFF -> R.string.dot_status_off
+            DotStatus.UNSUPPORTED -> R.string.dot_status_unsupported
+            DotStatus.EMPTY -> R.string.dot_status_empty
+            DotStatus.OUTSIDE_VPN -> R.string.dot_status_outside_vpn
+            DotStatus.PRIVATE_DNS -> R.string.dot_status_private_dns
+            DotStatus.READY -> R.string.dot_status_ready
+            DotStatus.ACTIVE -> R.string.dot_status_active
+            DotStatus.TLS_ERROR -> R.string.dot_status_tls_error
+        }
+        findPreferenceNotNull<SwitchPreference>("dot_enabled").summary = getString(summary)
     }
 
     private fun showSecretKeyDialog() {

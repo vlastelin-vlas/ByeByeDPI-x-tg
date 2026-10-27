@@ -12,6 +12,13 @@
         android:visibility="gone"
         android:queryHint="@string/search_apps" />
 
+    <Button
+        android:id="@+id/selectFilteredButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        android:text="@string/select_filtered_apps" />
+
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
