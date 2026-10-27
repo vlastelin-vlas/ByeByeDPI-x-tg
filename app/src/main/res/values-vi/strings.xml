@@ -98,6 +98,10 @@
     <string name="autoconnect_settings">Tự động kết nối khi ByeByeDPI khởi động</string>
     <string name="applist_setting">Bộ lọc ứng dụng</string>
     <string name="apps_select">Chọn ứng dụng</string>
+    <string name="dot_setting">DNS over TLS</string>
+    <string name="dot_setting_summary">Mã hóa truy vấn DNS cho ứng dụng đã chọn</string>
+    <string name="dot_apps_select">Ứng dụng dùng DoT</string>
+    <string name="dot_apps_summary">Đã chọn: %1$d; trong VPN: %2$d</string>
     <string name="search_apps">Tìm kiếm ứng dụng</string>
     <string name="storage_access">Quyền truy cập bộ nhớ</string>
     <string name="storage_access_summary">Cấp quyền truy cập bộ nhớ nếu bạn muốn dùng file trong các chiến lược</string>

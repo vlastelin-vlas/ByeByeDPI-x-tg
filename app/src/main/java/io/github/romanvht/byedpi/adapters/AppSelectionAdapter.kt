@@ -23,7 +23,9 @@ import kotlinx.coroutines.withContext
 
 class AppSelectionAdapter(
     context: Context,
-    allApps: List<AppInfo>
+    allApps: List<AppInfo>,
+    private val selectionKey: String = "selected_apps",
+    private val onVisibleSelectionChanged: () -> Unit = {},
 ) : RecyclerView.Adapter<AppSelectionAdapter.ViewHolder>(), Filterable {
 
     private val context = context.applicationContext
@@ -51,6 +53,7 @@ class AppSelectionAdapter(
                 app.isSelected = !app.isSelected
                 notifyItemChanged(position)
                 updateSelectedApps()
+                onVisibleSelectionChanged()
             }
         }
 
@@ -128,6 +131,7 @@ class AppSelectionAdapter(
                 filteredApps.clear()
                 filteredApps.addAll(newList)
                 notifyDataSetChanged()
+                onVisibleSelectionChanged()
             }
         }
     }
@@ -136,9 +140,21 @@ class AppSelectionAdapter(
         return originalApps.filter { it.isSelected }.map { it.packageName }.toSet()
     }
 
+    fun hasVisibleApps(): Boolean = filteredApps.isNotEmpty()
+
+    fun areVisibleAppsSelected(): Boolean = filteredApps.all { it.isSelected }
+
+    @SuppressLint("NotifyDataSetChanged")
+    fun setVisibleAppsSelected(selected: Boolean) {
+        filteredApps.forEach { it.isSelected = selected }
+        notifyDataSetChanged()
+        updateSelectedApps()
+        onVisibleSelectionChanged()
+    }
+
     private fun updateSelectedApps() {
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
         val selectedApps = getAllSelectedPackages()
-        prefs.edit { putStringSet("selected_apps", selectedApps) }
+        prefs.edit { putStringSet(selectionKey, selectedApps) }
     }
 }

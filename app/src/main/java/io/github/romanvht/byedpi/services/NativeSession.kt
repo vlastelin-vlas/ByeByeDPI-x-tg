@@ -1,6 +1,8 @@
 package io.github.romanvht.byedpi.services
 
 import android.app.Service
+import android.net.ConnectivityManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
@@ -25,6 +27,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.IOException
 import java.net.InetSocketAddress
+import java.net.InetAddress
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -59,6 +62,7 @@ internal class NativeSession(
     private var tunnelThread: Thread? = null
     private var tunFd: ParcelFileDescriptor? = null
     private var startJob: Job? = null
+    private var dotRelay: DotDnsRelay? = null
 
     val binder: IBinder get() = messenger.binder
 
@@ -101,6 +105,9 @@ internal class NativeSession(
                 if (tunnelThread != null) TProxyService.stopTunnel()
                 proxy?.stopProxy()
                 tunnelThread?.join()
+                TProxyService.dnsRoute = null
+                dotRelay?.close()
+                dotRelay = null
                 proxyThread?.join()
                 tunFd?.close()
             } catch (e: Throwable) {
@@ -184,6 +191,9 @@ internal class NativeSession(
             data.getBoolean(EngineProtocol.IPV6),
             data.getString(EngineProtocol.APP_LIST_TYPE) ?: "disable",
             data.getStringArray(EngineProtocol.APPS)?.toList().orEmpty(),
+            data.getBoolean(EngineProtocol.DOT_ENABLED),
+            data.getStringArray(EngineProtocol.DOT_PACKAGES)?.toList().orEmpty(),
+            data.getString(EngineProtocol.DOT_SERVER) ?: "dns.zapret.moe",
         )
         state = EngineProtocol.STATE_STARTING
         reply(EngineProtocol.CONFIGURED)
@@ -208,6 +218,7 @@ internal class NativeSession(
                 createTunnel?.let { create ->
                     val fd = create(config)
                     tunFd = fd
+                    startDnsRelay(config)
                     val tunnelConfig = buildString {
                         appendLine("tunnel:")
                         appendLine("  mtu: 8500")
@@ -226,13 +237,59 @@ internal class NativeSession(
                     reply(EngineProtocol.STARTED)
                 }
             } catch (e: CancellationException) {
+                closeDnsRelay()
                 if (state != EngineProtocol.STATE_STOPPING) fail("Engine startup timed out")
                 throw e
             } catch (e: Throwable) {
+                closeDnsRelay()
                 Log.e(TAG, "Failed to start engine", e)
                 fail(e.message ?: "Failed to start engine")
             }
         }
+    }
+
+    private fun startDnsRelay(config: Configuration) {
+        if (!config.dotEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val vpn = service as? ByeDpiVpnService ?: return
+        val eligible = SelectiveDns.eligiblePackages(
+            config.appListType, config.apps.toSet(), config.dotPackages.toSet())
+        val uids = SelectiveDns.uidForPackages(service.packageManager, eligible)
+        Log.i(TAG, "DoT selected=${config.dotPackages.size}, eligible=${eligible.size}, uidCount=${uids.size}")
+        if (uids.isEmpty()) return
+        val connectivity = service.getSystemService(ConnectivityManager::class.java)
+        val endpoint = DotEndpoint.parse(config.dotServer) ?: throw IOException("Invalid DoT server")
+        val dot = DotClient.forVpn(vpn, connectivity, endpoint)
+        val relay = DotDnsRelay({ request ->
+            dot.query(request).also { Log.d(TAG, "DoT query succeeded") }
+        }) { error ->
+            Log.e(TAG, "DNS over TLS query failed: ${error.javaClass.simpleName}: ${error.message}")
+            reply(EngineProtocol.DOT_ERROR, Bundle().apply {
+                putString(EngineProtocol.ERROR, error.javaClass.simpleName)
+            })
+        }
+        dotRelay = relay
+        Log.i(TAG, "DoT relay listening on port ${relay.port}")
+        TProxyService.dnsRoute = { protocol, source, sourcePort, destination, destinationPort ->
+            if (destinationPort != 53) 0 else try {
+                val sourceAddress = InetSocketAddress(InetAddress.getByName(source), sourcePort)
+                val destinationAddress = InetSocketAddress(InetAddress.getByName(destination), destinationPort)
+                val uid = connectivity.getConnectionOwnerUid(protocol, sourceAddress, destinationAddress)
+                Log.d(TAG, "DNS flow owner uid=$uid protocol=$protocol selected=${uid in uids}")
+                SelectiveDns.relayPortFor(uid, destinationPort, uids, relay.port).also { port ->
+                    if (port != 0) Log.d(TAG, "DoT route selected for uid=$uid protocol=$protocol")
+                    else if (uid < 0) Log.w(TAG, "DNS flow has unknown owner UID")
+                }
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not identify DNS flow owner: ${error.javaClass.simpleName}")
+                0
+            }
+        }
+    }
+
+    private fun closeDnsRelay() {
+        TProxyService.dnsRoute = null
+        dotRelay?.close()
+        dotRelay = null
     }
 
     private fun runNative(name: String, run: () -> Int): Thread = thread(name = name) {

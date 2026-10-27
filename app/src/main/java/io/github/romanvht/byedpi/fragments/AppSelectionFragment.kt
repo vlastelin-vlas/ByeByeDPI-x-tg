@@ -8,6 +8,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ProgressBar
+import android.widget.Button
 import android.widget.SearchView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -24,9 +25,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class AppSelectionFragment : Fragment() {
+    private val selectionKey: String
+        get() = arguments?.getString("selection_key") ?: "selected_apps"
     private lateinit var recyclerView: RecyclerView
     private lateinit var searchView: SearchView
     private lateinit var progressBar: ProgressBar
+    private lateinit var selectFilteredButton: Button
     private lateinit var adapter: AppSelectionAdapter
     private lateinit var prefs: SharedPreferences
 
@@ -41,6 +45,10 @@ class AppSelectionFragment : Fragment() {
         recyclerView = view.findViewById(R.id.recyclerView)
         searchView = view.findViewById(R.id.searchView)
         progressBar = view.findViewById(R.id.progressBar)
+        selectFilteredButton = view.findViewById(R.id.selectFilteredButton)
+        selectFilteredButton.setOnClickListener {
+            adapter.setVisibleAppsSelected(!adapter.areVisibleAppsSelected())
+        }
 
         setupRecyclerView()
         setupSearchView()
@@ -64,7 +72,10 @@ class AppSelectionFragment : Fragment() {
             override fun onQueryTextSubmit(query: String?): Boolean = false
 
             override fun onQueryTextChange(newText: String?): Boolean {
-                adapter.filter.filter(newText)
+                if (::adapter.isInitialized) {
+                    selectFilteredButton.isEnabled = false
+                    adapter.filter.filter(newText)
+                }
                 return true
             }
         })
@@ -73,23 +84,34 @@ class AppSelectionFragment : Fragment() {
     private fun loadApps() {
         progressBar.visibility = View.VISIBLE
         searchView.visibility = View.GONE
+        selectFilteredButton.visibility = View.GONE
 
         lifecycleScope.launch {
             val apps = withContext(Dispatchers.IO) {
                 getInstalledAppsAsync()
             }
 
-            adapter = AppSelectionAdapter(requireContext(), apps)
+            adapter = AppSelectionAdapter(requireContext(), apps, selectionKey, ::updateSelectFilteredButton)
             recyclerView.adapter = adapter
             progressBar.visibility = View.GONE
             searchView.visibility = View.VISIBLE
+            selectFilteredButton.visibility = View.VISIBLE
+            updateSelectFilteredButton()
         }
+    }
+
+    private fun updateSelectFilteredButton() {
+        selectFilteredButton.isEnabled = adapter.hasVisibleApps()
+        selectFilteredButton.setText(
+            if (adapter.areVisibleAppsSelected()) R.string.deselect_filtered_apps
+            else R.string.select_filtered_apps
+        )
     }
 
     private suspend fun getInstalledAppsAsync(): List<AppInfo> {
         val pm = requireContext().packageManager
         val installedApps = pm.getInstalledApplications(0)
-        val selectedApps = prefs.getStringSet("selected_apps", setOf()) ?: setOf()
+        val selectedApps = prefs.getStringSet(selectionKey, setOf()) ?: setOf()
 
         return installedApps
             .filter { it.packageName != requireContext().packageName }

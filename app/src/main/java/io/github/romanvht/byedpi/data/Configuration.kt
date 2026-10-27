@@ -8,4 +8,7 @@ data class Configuration(
     val ipv6: Boolean = false,
     val appListType: String = "disable",
     val apps: List<String> = emptyList(),
+    val dotEnabled: Boolean = false,
+    val dotPackages: List<String> = emptyList(),
+    val dotServer: String = "dns.zapret.moe",
 )

@@ -11,6 +11,7 @@ internal object EngineProtocol {
     const val FAILED = 6
     const val STOPPING = 7
     const val CONFIGURED = 8
+    const val DOT_ERROR = 9
 
     const val CONTROL_ACTION = "${BuildConfig.APPLICATION_ID}.ENGINE"
     const val BOUND_CONTROL_ACTION = "${BuildConfig.APPLICATION_ID}.BOUND_ENGINE"
@@ -26,7 +27,11 @@ internal object EngineProtocol {
     const val IPV6 = "ipv6"
     const val APP_LIST_TYPE = "app_list_type"
     const val APPS = "apps"
+    const val DOT_ENABLED = "dot_enabled"
+    const val DOT_PACKAGES = "dot_packages"
+    const val DOT_SERVER = "dot_server"
     const val PID = "pid"
     const val STATE = "state"
     const val ERROR = "error"
+    const val DOT_RUNTIME_ERROR = "dot_runtime_error"
 }

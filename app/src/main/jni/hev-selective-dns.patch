@@ -1,0 +1,145 @@
+diff --git a/src/hev-socks5-session-tcp.c b/src/hev-socks5-session-tcp.c
+index 7bcfa05..a964d91 100644
+--- a/src/hev-socks5-session-tcp.c
++++ b/src/hev-socks5-session-tcp.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include <errno.h>
++#include <netinet/in.h>
+ #include <string.h>
+ 
+ #include <lwip/tcp.h>
+@@ -296,6 +297,12 @@ hev_socks5_session_tcp_construct (HevSocks5SessionTCP *self,
+     if (res < 0)
+         return -1;
+ 
++    int relay_port = hev_socks5_tunnel_dns_relay_port (IPPROTO_TCP,
++        &pcb->remote_ip, pcb->remote_port, &pcb->local_ip, pcb->local_port);
++    if (relay_port > 0)
++        hev_socks5_addr_from_ipv4 (&addr, &(ip4_addr_t){ .addr = PP_HTONL (0x7f000001UL) },
++                                   htons (relay_port));
++
+     res = hev_socks5_client_tcp_construct (&self->base, &addr);
+     if (res < 0)
+         return -1;
+diff --git a/src/hev-socks5-session-udp.c b/src/hev-socks5-session-udp.c
+index 3c009ab..64987fb 100644
+--- a/src/hev-socks5-session-udp.c
++++ b/src/hev-socks5-session-udp.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include <errno.h>
++#include <netinet/in.h>
+ #include <string.h>
+ 
+ #include <lwip/udp.h>
+@@ -135,7 +136,10 @@ hev_socks5_session_udp_fwd_b (HevSocks5SessionUDP *self, unsigned int num)
+         err_t err;
+         int ret;
+ 
+-        if (self->addr && self->port) {
++        if (self->dns_relay_port) {
++            saddr = self->dns_original_ip;
++            port = 53;
++        } else if (self->addr && self->port) {
+             ip_2_ip4 (&saddr)->addr = self->addr;
+             port = self->port;
+         } else {
+@@ -178,6 +182,14 @@ udp_recv_handler (void *arg, struct udp_pcb *pcb, struct pbuf *p,
+         return;
+     }
+ 
++    if (!self->dns_route_decided) {
++        self->dns_route_decided = 1;
++        self->dns_relay_port = hev_socks5_tunnel_dns_relay_port (IPPROTO_UDP,
++            addr, port, &pcb->local_ip, pcb->local_port);
++        if (self->dns_relay_port)
++            self->dns_original_ip = pcb->local_ip;
++    }
++
+     if (self->frames > UDP_POOL_SIZE) {
+         pbuf_free (p);
+         return;
+@@ -193,6 +205,11 @@ udp_recv_handler (void *arg, struct udp_pcb *pcb, struct pbuf *p,
+     memset (&frame->node, 0, sizeof (frame->node));
+     hev_socks5_addr_from_lwip (&frame->addr, &pcb->local_ip, pcb->local_port);
+ 
++    if (self->dns_relay_port)
++        hev_socks5_addr_from_ipv4 (&frame->addr,
++            &(ip4_addr_t){ .addr = PP_HTONL (0x7f000001UL) },
++            htons (self->dns_relay_port));
++
+     if (frame->addr.atype == HEV_SOCKS5_ADDR_TYPE_NAME) {
+         self->addr = ip_2_ip4 (&pcb->local_ip)->addr;
+         self->port = pcb->local_port;
+diff --git a/src/hev-socks5-session-udp.h b/src/hev-socks5-session-udp.h
+index 069f59e..4cfb5a5 100644
+--- a/src/hev-socks5-session-udp.h
++++ b/src/hev-socks5-session-udp.h
+@@ -33,6 +33,9 @@ struct _HevSocks5SessionUDP
+     int frames;
+     int addr;
+     int port;
++    ip_addr_t dns_original_ip;
++    int dns_relay_port;
++    int dns_route_decided;
+ };
+ 
+ struct _HevSocks5SessionUDPClass
+diff --git a/src/hev-socks5-tunnel.c b/src/hev-socks5-tunnel.c
+index d025c6f..219d65c 100644
+--- a/src/hev-socks5-tunnel.c
++++ b/src/hev-socks5-tunnel.c
+@@ -59,6 +59,30 @@ static HevTask *task_event;
+ static HevTask *task_lwip_io;
+ static HevTask *task_lwip_timer;
+ static HevList session_set;
++static HevDnsRouteCallback dns_route_callback;
++
++void
++hev_socks5_tunnel_set_dns_route_callback (HevDnsRouteCallback callback)
++{
++    dns_route_callback = callback;
++}
++
++int
++hev_socks5_tunnel_dns_relay_port (int protocol, const ip_addr_t *source,
++                                  int source_port, const ip_addr_t *destination,
++                                  int destination_port)
++{
++    char source_text[IPADDR_STRLEN_MAX];
++    char destination_text[IPADDR_STRLEN_MAX];
++
++    if (destination_port != 53 || !dns_route_callback)
++        return 0;
++    if (!ipaddr_ntoa_r (source, source_text, sizeof (source_text)) ||
++        !ipaddr_ntoa_r (destination, destination_text, sizeof (destination_text)))
++        return 0;
++    return dns_route_callback (protocol, source_text, source_port,
++                               destination_text, destination_port);
++}
+ 
+ static int
+ task_io_yielder (HevTaskYieldType type, void *data)
+diff --git a/src/hev-socks5-tunnel.h b/src/hev-socks5-tunnel.h
+index 3086329..125b994 100644
+--- a/src/hev-socks5-tunnel.h
++++ b/src/hev-socks5-tunnel.h
+@@ -11,6 +11,15 @@
+ #define __HEV_SOCKS5_TUNNEL_H__
+ 
+ #include "hev-list.h"
++#include <lwip/ip_addr.h>
++
++typedef int (*HevDnsRouteCallback) (int protocol, const char *source,
++                                    int source_port, const char *destination,
++                                    int destination_port);
++void hev_socks5_tunnel_set_dns_route_callback (HevDnsRouteCallback callback);
++int hev_socks5_tunnel_dns_relay_port (int protocol, const ip_addr_t *source,
++                                      int source_port, const ip_addr_t *destination,
++                                      int destination_port);
+ 
+ int hev_socks5_tunnel_init (int tun_fd);
+ void hev_socks5_tunnel_fini (void);

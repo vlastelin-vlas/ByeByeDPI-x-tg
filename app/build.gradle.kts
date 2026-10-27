@@ -1,5 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
+import java.io.ByteArrayOutputStream
 
 plugins {
     id("com.android.application")
@@ -34,8 +35,8 @@ android {
         minSdk = 21
         //noinspection OldTargetApi
         targetSdk = 34
-        versionCode = 20
-        versionName = "2.0.0"
+        versionCode = 22
+        versionName = "2.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -140,8 +141,44 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
 }
 
+val tunnelSource = file("src/main/jni/hev-socks5-tunnel")
+val tunnelPatch = file("src/main/jni/hev-selective-dns.patch")
+var tunnelPatchAppliedByBuild = false
+
+fun applyTunnelPatch(vararg arguments: String): Boolean {
+    val output = ByteArrayOutputStream()
+    val result = project.exec {
+        workingDir = tunnelSource
+        commandLine(listOf("git", "-c", "safe.directory=${tunnelSource.absolutePath.replace('\\', '/')}",
+            "apply") + arguments + tunnelPatch.absolutePath)
+        isIgnoreExitValue = true
+        standardOutput = output
+        errorOutput = output
+    }
+    return result.exitValue == 0
+}
+
+val restoreTunnelPatch = tasks.register("restoreTunnelPatch") {
+    doLast {
+        if (tunnelPatchAppliedByBuild) {
+            check(applyTunnelPatch("--reverse")) { "Could not restore embedded tunnel sources" }
+            tunnelPatchAppliedByBuild = false
+        }
+    }
+}
+
 tasks.register<Exec>("runNdkBuild") {
     group = "build"
+
+    doFirst {
+        if (!applyTunnelPatch("--reverse", "--check")) {
+            check(applyTunnelPatch("--check") && applyTunnelPatch()) {
+                "Could not apply selective DNS patch to embedded tunnel"
+            }
+            tunnelPatchAppliedByBuild = true
+        }
+    }
+    finalizedBy(restoreTunnelPatch)
 
     val ndkDir = android.ndkDirectory
     executable = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
