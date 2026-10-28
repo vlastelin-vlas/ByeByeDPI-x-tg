@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Other locales use these English defaults until translated. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <string name="quiet_hours_title">Quiet hours</string>
+    <string name="quiet_hours_description">Stop ByeDPI and Telegram proxy every day during these hours. Resume previously running services afterwards. Telegram may be unavailable while its local proxy is stopped.</string>
+    <string name="quiet_hours_start">Start</string>
+    <string name="quiet_hours_end">End</string>
+    <string name="quiet_hours_status">Schedule status</string>
+    <string name="quiet_hours_off">Disabled</string>
+    <string name="quiet_hours_active">Quiet hours are active. Starts are deferred until the end of the period.</string>
+    <string name="quiet_hours_waiting">Scheduled daily using the phone’s local time</string>
+    <string name="quiet_hours_allow_alarm">Allow alarms and reminders in Android settings, then enable quiet hours here.</string>
+    <string name="quiet_hours_equal_times">Start and end must be different.</string>
+    <string name="quiet_hours_cancel_resume">Cancel automatic resume</string>
+    <string name="quiet_hours_paused_until">Proxying is paused until %1$s. Previously running services will resume automatically.</string>
+    <string name="quiet_hours_resume_failed">Automatic resume failed. Open the app to retry.</string>
+</resources>

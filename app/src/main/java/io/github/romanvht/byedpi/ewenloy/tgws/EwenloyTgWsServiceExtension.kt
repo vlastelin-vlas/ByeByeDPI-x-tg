@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import io.github.romanvht.byedpi.R
+import io.github.romanvht.byedpi.services.QuietHours
 
 /**
  * Bridge between ByeDPI services and TgWsProxyService.
@@ -33,6 +34,7 @@ class EwenloyTgWsServiceExtension {
         if (!enabled) { writeStatus(TG_STATUS_DISABLED); return }
 
         val ctx = context ?: return
+        if (QuietHours.deferTelegram(ctx)) return
         val secret = ensureSecret(preferences)
         val poolSize = preferences.getString(PREF_POOL_SIZE, DEFAULT_POOL_SIZE.toString())?.toIntOrNull() ?: DEFAULT_POOL_SIZE
         val cfEnabled = preferences.getBoolean(PREF_CF_ENABLED, true)
@@ -53,20 +55,27 @@ class EwenloyTgWsServiceExtension {
             }
         )
         Log.i(TAG, "TgWsProxyService start requested on port $TG_WS_PORT")
+        QuietHours.reschedule(ctx)
     }
 
     fun refreshFromPreferences(preferences: SharedPreferences) {
         if (!initialized) return
         this.preferences = preferences
         val nowEnabled = preferences.getBoolean(EWENLOY_TG_WS_MODE_KEY, false)
-        if (!nowEnabled) { if (isRunning()) stop(); return }
+        if (!nowEnabled) {
+            context?.let { QuietHours.cancelTelegramResume(it) }
+            if (isRunning()) stop()
+            return
+        }
         if (!isRunning()) start(preferences) else stop().also { start(preferences) }
     }
 
-    fun stop() {
+    fun stop(scheduled: Boolean = false) {
         val ctx = context ?: return
+        if (!scheduled) QuietHours.cancelTelegramResume(ctx)
         ctx.startService(Intent(ctx, TgWsProxyService::class.java).apply {
             action = TgWsProxyService.ACTION_STOP
+            putExtra(TgWsProxyService.EXTRA_SCHEDULED_STOP, scheduled)
         })
         writeStatus(TG_STATUS_DISABLED)
         Log.i(TAG, "TgWsProxyService stop requested")

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quiet_hours_title">Тихий час</string>
+    <string name="quiet_hours_description">Ежедневно останавливать ByeDPI и прокси Telegram в заданные часы. После паузы возобновлять ранее работавшие сервисы. Telegram может быть недоступен, пока локальный прокси остановлен.</string>
+    <string name="quiet_hours_start">Начало</string>
+    <string name="quiet_hours_end">Окончание</string>
+    <string name="quiet_hours_status">Состояние расписания</string>
+    <string name="quiet_hours_off">Выключено</string>
+    <string name="quiet_hours_active">Сейчас тихий час. Запуск отложен до окончания паузы.</string>
+    <string name="quiet_hours_waiting">Ежедневно по местному времени телефона</string>
+    <string name="quiet_hours_allow_alarm">Разрешите будильники и напоминания в настройках Android, затем включите тихий час здесь.</string>
+    <string name="quiet_hours_equal_times">Начало и окончание должны различаться.</string>
+    <string name="quiet_hours_cancel_resume">Отменить автовозобновление</string>
+    <string name="quiet_hours_paused_until">Проксирование приостановлено до %1$s. Ранее работавшие сервисы возобновятся автоматически.</string>
+    <string name="quiet_hours_resume_failed">Не удалось возобновить работу автоматически. Откройте приложение для повторного запуска.</string>
+</resources>

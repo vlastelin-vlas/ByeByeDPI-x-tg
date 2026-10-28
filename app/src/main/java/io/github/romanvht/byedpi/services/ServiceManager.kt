@@ -44,6 +44,18 @@ object ServiceManager {
         scope.launch { waitStart(app, mode) }
     }
 
+    fun resumeScheduled(context: Context, mode: Mode) {
+        val app = context.applicationContext as Application
+        // Dispatchers.Main.immediate issues the foreground-service start before
+        // the alarm broadcast finishes; readiness may take longer than its budget.
+        scope.launch {
+            if (waitStart(app, mode)) {
+                QuietHours.cancelByeDpiResume(app)
+                QuietHours.requestUpdate(app)
+            }
+        }
+    }
+
     suspend fun waitStart(context: Context, mode: Mode): Boolean {
         val app = context.applicationContext as Application
         val command = commands.incrementAndGet()
@@ -52,14 +64,17 @@ object ServiceManager {
         }
     }
 
-    fun stop() {
+    fun stop(context: Context? = null) {
+        (context ?: application)?.let { QuietHours.cancelByeDpiResume(it) }
         scope.launch { waitStop() }
     }
 
-    suspend fun waitStop() {
+    suspend fun waitStop(scheduled: Boolean = false, context: Context? = null) {
         commands.incrementAndGet()
         withContext(Dispatchers.Main.immediate + NonCancellable) {
+            if (context != null) application = context.applicationContext as Application
             application?.let {
+                if (!scheduled) QuietHours.cancelByeDpiResume(it)
                 restore(it)
                 (it.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(PAUSE_NOTIFICATION_ID)
             }
@@ -94,6 +109,8 @@ object ServiceManager {
             if (sourcePid > 0 && (action == STOP_ACTION || action == PAUSE_ACTION) && session?.mode != mode) {
                 return@withContext
             }
+            if ((action == START_ACTION || action == RESUME_ACTION || action == RESTART_ACTION) &&
+                QuietHours.deferByeDpi(app, mode)) return@withContext
             when (action) {
                 START_ACTION, RESUME_ACTION, RESTART_ACTION -> {
                     if (mode != Mode.VPN || VpnService.prepare(app) == null) {
@@ -148,6 +165,11 @@ object ServiceManager {
         configured: CompletableDeferred<Boolean>? = null,
     ): Boolean = mutex.withLock {
         if (TestService.isRunning || commands.get() != command) return@withLock false
+        if (QuietHours.deferByeDpi(app, mode)) {
+            configured?.complete(false)
+            return@withLock false
+        }
+        QuietHours.reschedule(app)
         restore(app)
         session?.let { previous ->
             if (!previous.stopping && previous.mode == mode) {

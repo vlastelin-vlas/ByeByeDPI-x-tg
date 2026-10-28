@@ -12,6 +12,7 @@ import android.util.Log
 import io.github.romanvht.byedpi.data.Mode
 import io.github.romanvht.byedpi.ewenloy.tgws.EwenloyTgWsServiceExtension
 import io.github.romanvht.byedpi.services.ServiceManager
+import io.github.romanvht.byedpi.services.QuietHours
 import io.github.romanvht.byedpi.utility.getPreferences
 import io.github.romanvht.byedpi.utility.mode
 
@@ -49,6 +50,10 @@ class BootReceiver : BroadcastReceiver() {
     private fun tryAutostart(context: Context, reason: String) {
         runCatching {
             val preferences = context.getPreferences()
+            if (QuietHours.isActive(context) || QuietHours.hasPendingResume(context)) {
+                QuietHours.requestUpdate(context)
+                return
+            }
 
             // TG WS стартует независимо от ByeDPI-сервиса, если тумблер включён
             if (preferences.getBoolean(EwenloyTgWsServiceExtension.EWENLOY_TG_WS_MODE_KEY, false)) {

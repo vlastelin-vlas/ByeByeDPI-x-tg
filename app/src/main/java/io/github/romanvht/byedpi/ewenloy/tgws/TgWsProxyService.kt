@@ -10,12 +10,12 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import io.github.romanvht.byedpi.R
 import io.github.romanvht.byedpi.activities.MainActivity
+import io.github.romanvht.byedpi.services.QuietHours
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +25,6 @@ import java.net.ServerSocket
 
 class TgWsProxyService : Service() {
 
-    private var wakeLock: PowerManager.WakeLock? = null
     private var statsJob: Job? = null
     private var restartJob: Job? = null
     private var lastNotificationContent: String = ""
@@ -63,18 +62,13 @@ class TgWsProxyService : Service() {
         const val EXTRA_CFPROXY_PRIORITY = "EXTRA_CFPROXY_PRIORITY"
         const val EXTRA_CFPROXY_DOMAIN = "EXTRA_CFPROXY_DOMAIN"
         const val EXTRA_SECRET_KEY = "EXTRA_SECRET_KEY"
+        const val EXTRA_SCHEDULED_STOP = "EXTRA_SCHEDULED_STOP"
         
         private const val NOTIFICATION_ID = 101
         private const val CHANNEL_ID = "TG_WS_Proxy_Service_v4"
         private const val TAG = "ProxyService"
 
-        // Wakelock refresh interval (25 min, re-acquire before 30-min timeout)
-        private const val WAKELOCK_TIMEOUT_MS = 30L * 60 * 1000
-        private const val WAKELOCK_REFRESH_MS = 25L * 60 * 1000
-
-        // Stats/notification update interval.
-        // Relaxed on purpose: each tick runs while a partial wakelock is held,
-        // so 10s keeps the traffic info fresh without draining the battery.
+        // Best-effort statistics while awake; this must never keep the CPU awake.
         private const val STATS_UPDATE_MS = 10_000L
         private const val NOTIFICATION_MIN_UPDATE_MS = 10_000L
         private const val NATIVE_STOP_WAIT_MS = 3_000L
@@ -115,6 +109,9 @@ class TgWsProxyService : Service() {
                 startProxy(bindIp, port, ips, poolSize, cfEnabled, cfPriority, cfDomain, secretKey)
             }
             ACTION_STOP -> {
+                if (!intent.getBooleanExtra(EXTRA_SCHEDULED_STOP, false)) {
+                    QuietHours.cancelTelegramResume(this)
+                }
                 stopProxy()
             }
             ACTION_RESTART -> {
@@ -181,8 +178,12 @@ class TgWsProxyService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
 
-        acquireWakeLock()
         stopInProgress = false
+        // Also guard redelivered intents and notification restarts, not only UI starts.
+        if (QuietHours.deferTelegram(this)) {
+            stopProxy()
+            return
+        }
         
         // Start Go proxy in a separate thread with error handling
         Thread({
@@ -233,14 +234,6 @@ class TgWsProxyService : Service() {
         // Stats updater. Notification updates are throttled so the system keeps
         // a stable foreground entry instead of constantly reordering it.
         statsJob = serviceScope.launch {
-            // WakeLock refresh sub-job: re-acquire before system timeout
-            launch {
-                while (isActive) {
-                    delay(WAKELOCK_REFRESH_MS)
-                    refreshWakeLock()
-                }
-            }
-
             while (isActive) {
                 delay(STATS_UPDATE_MS)
                 if (_isRunning.value && !stopInProgress) {
@@ -329,7 +322,6 @@ class TgWsProxyService : Service() {
             statsJob = null
 
             requestNativeStop("restart")
-            releaseWakeLock()
             updateRunningState(false)
             delay(350)
 
@@ -385,7 +377,6 @@ class TgWsProxyService : Service() {
             updateNotification(getString(R.string.notification_stopping), force = true)
             _lastTraffic.value = null
             requestNativeStop("stop")
-            releaseWakeLock()
             updateRunningState(false)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -442,58 +433,6 @@ class TgWsProxyService : Service() {
             // The service continues because stopWithTask=false in manifest
             // No action needed — the service keeps running.
         }
-    }
-
-    private fun acquireWakeLock() {
-        try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = powerManager.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "TgWsProxy::ServiceWakeLock"
-            ).apply {
-                // Acquire with timeout. System may ignore indefinite wakelocks.
-                acquire(WAKELOCK_TIMEOUT_MS)
-            }
-            Log.d(TAG, "WakeLock acquired (${WAKELOCK_TIMEOUT_MS / 60000}min)")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to acquire WakeLock", e)
-        }
-    }
-
-    /**
-     * Periodically refresh wakelock to prevent system from expiring it.
-     */
-    private fun refreshWakeLock() {
-        try {
-            wakeLock?.let {
-                if (it.isHeld) {
-                    it.release()
-                }
-            }
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = powerManager.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "TgWsProxy::ServiceWakeLock"
-            ).apply {
-                acquire(WAKELOCK_TIMEOUT_MS)
-            }
-            Log.d(TAG, "WakeLock refreshed")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to refresh WakeLock", e)
-        }
-    }
-
-    private fun releaseWakeLock() {
-        try {
-            wakeLock?.let {
-                if (it.isHeld) {
-                    it.release()
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to release WakeLock", e)
-        }
-        wakeLock = null
     }
 
     private fun updateRunningState(isRunning: Boolean) {
@@ -570,7 +509,6 @@ class TgWsProxyService : Service() {
         restartJob = null
         statsJob?.cancel()
         statsJob = null
-        releaseWakeLock()
         if (_isRunning.value) {
             updateRunningState(false)
         }

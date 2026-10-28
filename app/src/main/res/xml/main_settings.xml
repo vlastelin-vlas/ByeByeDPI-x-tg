@@ -59,6 +59,30 @@
 
     </androidx.preference.PreferenceCategory>
 
+    <androidx.preference.PreferenceCategory android:title="@string/quiet_hours_title">
+        <SwitchPreference
+            android:key="quiet_hours_enabled"
+            android:title="@string/quiet_hours_title"
+            android:summary="@string/quiet_hours_description"
+            android:defaultValue="false" />
+        <Preference
+            android:key="quiet_hours_start"
+            android:title="@string/quiet_hours_start"
+            android:dependency="quiet_hours_enabled" />
+        <Preference
+            android:key="quiet_hours_end"
+            android:title="@string/quiet_hours_end"
+            android:dependency="quiet_hours_enabled" />
+        <Preference
+            android:key="quiet_hours_status"
+            android:title="@string/quiet_hours_status"
+            android:selectable="false" />
+        <Preference
+            android:key="quiet_hours_cancel_resume"
+            android:title="@string/quiet_hours_cancel_resume"
+            app:isPreferenceVisible="false" />
+    </androidx.preference.PreferenceCategory>
+
     <androidx.preference.PreferenceCategory
         android:title="@string/general_category">
 

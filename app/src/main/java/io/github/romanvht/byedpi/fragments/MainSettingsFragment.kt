@@ -3,6 +3,9 @@ package io.github.romanvht.byedpi.fragments
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.app.TimePickerDialog
+import android.provider.Settings
+import android.text.format.DateFormat
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -24,6 +27,7 @@ import io.github.romanvht.byedpi.services.DotStatus
 import io.github.romanvht.byedpi.services.DotEndpoint
 import io.github.romanvht.byedpi.services.EngineProtocol
 import io.github.romanvht.byedpi.services.NativeEngine
+import io.github.romanvht.byedpi.services.QuietHours
 import io.github.romanvht.byedpi.databinding.DialogDonateBinding
 import io.github.romanvht.byedpi.ewenloy.tgws.EwenloyTgWsServiceExtension
 import io.github.romanvht.byedpi.utility.*
@@ -48,6 +52,7 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
         override fun run() {
             updateTelegramRuntimeStatus()
             updateDotStatus()
+            updateQuietHours()
             uiHandler.postDelayed(this, 1500)
         }
     }
@@ -59,6 +64,7 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.main_settings, rootKey)
+        setupQuietHours()
 
         setEditTextPreferenceListener("byedpi_proxy_ip") { checkIp(it) }
         setEditTestPreferenceListenerPort("byedpi_proxy_port")
@@ -171,6 +177,7 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
 
     override fun onResume() {
         super.onResume()
+        QuietHours.requestUpdate(requireContext())
         sharedPreferences?.registerOnSharedPreferenceChangeListener(preferenceListener)
         uiHandler.post(statusUpdater)
         updatePreferences()
@@ -184,6 +191,7 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun updatePreferences() {
+        updateQuietHours()
         val cmdEnable = findPreferenceNotNull<SwitchPreference>("byedpi_enable_cmd_settings").isChecked
         val mode = findPreferenceNotNull<ListPreference>("byedpi_mode").value.let { Mode.fromString(it) }
         val dns = findPreferenceNotNull<Preference>("dns_ip_picker")
@@ -310,6 +318,64 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun setupQuietHours() {
+        findPreferenceNotNull<SwitchPreference>(QuietHours.ENABLED).setOnPreferenceChangeListener { _, value ->
+            if (value == true && !QuietHours.canSchedule(requireContext())) {
+                startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    "package:${requireContext().packageName}".toUri()))
+                Toast.makeText(requireContext(), R.string.quiet_hours_allow_alarm, Toast.LENGTH_LONG).show()
+                false
+            } else {
+                uiHandler.post {
+                    QuietHours.requestUpdate(requireContext())
+                    updateQuietHours()
+                }
+                true
+            }
+        }
+        for (key in listOf(QuietHours.START, QuietHours.END)) {
+            findPreferenceNotNull<Preference>(key).setOnPreferenceClickListener {
+                val window = QuietHours.window(requireContext())
+                val minute = if (key == QuietHours.START) window.start else window.end
+                TimePickerDialog(requireContext(), { _, hour, min ->
+                    val chosen = hour * 60 + min
+                    val other = if (key == QuietHours.START) window.end else window.start
+                    if (chosen == other) {
+                        Toast.makeText(requireContext(), R.string.quiet_hours_equal_times, Toast.LENGTH_LONG).show()
+                    } else {
+                        sharedPreferences?.edit { putInt(key, chosen) }
+                        QuietHours.requestUpdate(requireContext())
+                        updateQuietHours()
+                    }
+                }, minute / 60, minute % 60, DateFormat.is24HourFormat(requireContext())).show()
+                true
+            }
+        }
+        findPreferenceNotNull<Preference>("quiet_hours_cancel_resume").setOnPreferenceClickListener {
+            QuietHours.requestUpdate(requireContext(), cancelResume = true)
+            true
+        }
+    }
+
+    private fun updateQuietHours() {
+        val ctx = context ?: return
+        val window = QuietHours.window(ctx)
+        for ((key, minute) in listOf(QuietHours.START to window.start, QuietHours.END to window.end)) {
+            findPreferenceNotNull<Preference>(key).summary =
+                String.format(java.util.Locale.getDefault(), "%02d:%02d", minute / 60, minute % 60)
+        }
+        val enabled = sharedPreferences?.getBoolean(QuietHours.ENABLED, false) == true
+        val status = when {
+            !enabled -> R.string.quiet_hours_off
+            !QuietHours.canSchedule(ctx) -> R.string.quiet_hours_allow_alarm
+            window.start == window.end -> R.string.quiet_hours_equal_times
+            QuietHours.isActive(ctx) -> R.string.quiet_hours_active
+            else -> R.string.quiet_hours_waiting
+        }
+        findPreferenceNotNull<Preference>("quiet_hours_status").setSummary(status)
+        findPreferenceNotNull<Preference>("quiet_hours_cancel_resume").isVisible = QuietHours.hasPendingResume(ctx)
     }
 
     private fun showDonateDialog() {

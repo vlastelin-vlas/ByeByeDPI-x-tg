@@ -309,6 +309,7 @@ class MainActivity : BaseActivity() {
 
     override fun onResume() {
         super.onResume()
+        io.github.romanvht.byedpi.services.QuietHours.requestUpdate(this)
         ServiceManager.refresh(this)
         updateStatus()
         updateStrategyButton()
@@ -444,7 +445,7 @@ class MainActivity : BaseActivity() {
     }
 
     private fun stop() {
-        ServiceManager.stop()
+        ServiceManager.stop(this)
     }
 
     private fun updateStatus() {
